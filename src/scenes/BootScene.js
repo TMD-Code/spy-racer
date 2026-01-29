@@ -50,6 +50,7 @@ export default class BootScene extends Phaser.Scene {
     this.loadWithFallback('civilian2', 'assets/images/vehicles/civilian2.png');
     this.loadWithFallback('motorcycle', 'assets/images/vehicles/motorcycle.png');
     this.loadWithFallback('helicopter', 'assets/images/vehicles/helicopter.png');
+    this.loadWithFallback('weaponsVan', 'assets/Kenny assets/kenney_racing-pack/PNG/Cars/car_black_5.png');
 
     // Weapons
     this.loadWithFallback('bullet', 'assets/images/weapons/bullet.png');
@@ -61,6 +62,13 @@ export default class BootScene extends Phaser.Scene {
     this.loadWithFallback('shieldPowerup', 'assets/images/powerups/shield.png');
     this.loadWithFallback('lifePowerup', 'assets/images/powerups/life.png');
     this.loadWithFallback('speedPowerup', 'assets/images/powerups/speed.png');
+
+    // Scenery
+    this.loadWithFallback('tree_large', 'assets/Kenny assets/kenney_racing-pack/PNG/Objects/tree_large.png');
+    this.loadWithFallback('tree_small', 'assets/Kenny assets/kenney_racing-pack/PNG/Objects/tree_small.png');
+    this.loadWithFallback('rock1', 'assets/Kenny assets/kenney_racing-pack/PNG/Objects/rock1.png');
+    this.loadWithFallback('rock2', 'assets/Kenny assets/kenney_racing-pack/PNG/Objects/rock2.png');
+    this.loadWithFallback('rock3', 'assets/Kenny assets/kenney_racing-pack/PNG/Objects/rock3.png');
 
     // Handle load errors - generate fallback textures
     this.load.on('loaderror', (file) => {
@@ -131,6 +139,30 @@ export default class BootScene extends Phaser.Scene {
           heli.fillStyle(0x333333, 1);
           heli.fillRect(5, 23, 50, 4);
           heli.generateTexture('helicopter', 60, 50);
+          break;
+        }
+        case 'weaponsVan': {
+          // Large friendly weapons van - blue/white color scheme
+          const van = this.make.graphics({ x: 0, y: 0, add: false });
+          // Van body (blue)
+          van.fillStyle(0x2266cc, 1);
+          van.fillRect(10, 5, 40, 90);
+          // Van top (lighter blue)
+          van.fillStyle(0x4488ee, 1);
+          van.fillRect(15, 10, 30, 30);
+          // Van rear door (where player enters) - green highlight
+          van.fillStyle(0x00ff00, 1);
+          van.fillRect(15, 75, 30, 15);
+          // White stripe
+          van.fillStyle(0xffffff, 1);
+          van.fillRect(10, 45, 40, 5);
+          // Wheels
+          van.fillStyle(0x333333, 1);
+          van.fillCircle(15, 20, 6);
+          van.fillCircle(45, 20, 6);
+          van.fillCircle(15, 80, 6);
+          van.fillCircle(45, 80, 6);
+          van.generateTexture('weaponsVan', 60, 100);
           break;
         }
         case 'bullet': {

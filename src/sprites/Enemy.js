@@ -35,8 +35,8 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
-    // Physics setup
-    this.body.setSize(36 * (stats.scale || 1), 56 * (stats.scale || 1));
+    // Physics setup - match visual sprite size for accurate collisions
+    this.body.setSize(52 * (stats.scale || 1), 95 * (stats.scale || 1));
 
     // AI state
     this.aiState = 'driving';
@@ -96,6 +96,14 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
         scale: 1.2,
         tint: 0x333399,
         canShoot: false
+      },
+      [ENEMY_TYPES.RAMMER]: {
+        health: 3,
+        points: CONFIG.enemyKillPoints * 1.5,
+        speed: CONFIG.roadSpeed * 1.1,
+        scale: 1.15,
+        tint: 0x663300, // Brown/bronze color
+        canShoot: false
       }
     };
     return stats[type] || stats[ENEMY_TYPES.CHASER];
@@ -108,7 +116,8 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
       [ENEMY_TYPES.MOTORCYCLE]: { text: 'ENEMY', color: '#ff4444' },
       [ENEMY_TYPES.ARMORED]: { text: 'ARMOR', color: '#888888' },
       [ENEMY_TYPES.SHOOTER]: { text: 'SNIPER', color: '#ff0000' },
-      [ENEMY_TYPES.BLOCKER]: { text: 'BLOCK', color: '#4444ff' }
+      [ENEMY_TYPES.BLOCKER]: { text: 'BLOCK', color: '#4444ff' },
+      [ENEMY_TYPES.RAMMER]: { text: 'RAMMER', color: '#ff6600' }
     };
 
     const config = labelConfig[this.enemyType] || labelConfig[ENEMY_TYPES.CHASER];
@@ -160,6 +169,9 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
       case ENEMY_TYPES.BLOCKER:
         this.blockerAI(delta);
         break;
+      case ENEMY_TYPES.RAMMER:
+        this.rammerAI(delta);
+        break;
     }
 
     // Update projectiles
@@ -199,7 +211,11 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
 
     if (this.laneChangeTimer > 2000) {
       this.laneChangeTimer = 0;
-      this.targetX = player.x;
+      // Check if target lane is clear before committing to lane change
+      const targetLane = Math.floor((player.x - CONFIG.roadMargin) / CONFIG.laneWidth);
+      if (this.isLaneSafe(targetLane)) {
+        this.targetX = player.x;
+      }
     }
 
     const dx = this.targetX - this.x;
@@ -236,7 +252,10 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
         newLane = currentLane + (Math.random() < 0.5 ? -1 : 1);
       }
 
-      this.targetX = CONFIG.roadMargin + (newLane * CONFIG.laneWidth) + CONFIG.laneWidth / 2;
+      // Only change lane if it's safe
+      if (this.isLaneSafe(newLane)) {
+        this.targetX = CONFIG.roadMargin + (newLane * CONFIG.laneWidth) + CONFIG.laneWidth / 2;
+      }
     }
 
     if (Math.abs(this.x - this.targetX) > 5) {
@@ -261,7 +280,11 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     // Very slow targeting - easy to avoid
     if (this.laneChangeTimer > 3000) {
       this.laneChangeTimer = 0;
-      this.targetX = player.x;
+      const targetLane = Math.floor((player.x - CONFIG.roadMargin) / CONFIG.laneWidth);
+      // Only change lane if it's safe
+      if (this.isLaneSafe(targetLane)) {
+        this.targetX = player.x;
+      }
     }
 
     const dx = this.targetX - this.x;
@@ -326,8 +349,11 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
 
     if (this.laneChangeTimer > 1000) {
       this.laneChangeTimer = 0;
-      // Move to player's lane
-      this.targetX = player.x;
+      // Move to player's lane if it's safe
+      const targetLane = Math.floor((player.x - CONFIG.roadMargin) / CONFIG.laneWidth);
+      if (this.isLaneSafe(targetLane)) {
+        this.targetX = player.x;
+      }
     }
 
     const dx = this.targetX - this.x;
@@ -343,6 +369,66 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
     } else {
       this.speed = CONFIG.roadSpeed * 0.8;
     }
+  }
+
+  rammerAI(delta) {
+    const player = this.scene.player;
+    if (!player || !player.active) {
+      this.setVelocityX(0);
+      return;
+    }
+
+    // RAMMER BEHAVIOR: Get alongside player and push them toward road edge
+    const dy = this.y - player.y;
+    const dx = this.x - player.x;
+
+    // Phase 1: Get alongside the player (match Y position)
+    if (Math.abs(dy) > 30) {
+      // Adjust speed to get alongside player
+      if (dy > 0) {
+        // We're below player, speed up to catch up
+        this.speed = CONFIG.roadSpeed * 1.4;
+      } else {
+        // We're above player, slow down to let them catch up
+        this.speed = CONFIG.roadSpeed * 0.7;
+      }
+    } else {
+      // Phase 2: We're alongside - match speed and RAM!
+      this.speed = CONFIG.roadSpeed * 1.05; // Slightly faster to maintain position
+
+      // Determine which side of player we're on
+      // Try to push player toward nearest road edge
+      const playerDistToLeftEdge = player.x - CONFIG.roadMargin;
+      const playerDistToRightEdge = (CONFIG.width - CONFIG.roadMargin) - player.x;
+
+      // Position ourselves on the side opposite to the nearest edge
+      // so we can push player toward that edge
+      if (playerDistToLeftEdge < playerDistToRightEdge) {
+        // Player closer to left edge - get on their right and push left
+        this.targetX = player.x + 50;
+      } else {
+        // Player closer to right edge - get on their left and push right
+        this.targetX = player.x - 50;
+      }
+    }
+
+    // Aggressive horizontal movement toward target position
+    const horizontalDiff = this.targetX - this.x;
+    const ramSpeed = 120; // Fast horizontal movement for ramming
+
+    if (Math.abs(horizontalDiff) > 5) {
+      this.setVelocityX(horizontalDiff > 0 ? ramSpeed : -ramSpeed);
+    } else {
+      // We're in position - now RAM toward player!
+      const ramDirection = dx > 0 ? -1 : 1; // Move toward player
+      this.setVelocityX(ramDirection * ramSpeed * 1.5);
+    }
+
+    // Keep within road bounds
+    const minX = CONFIG.roadMargin + 20;
+    const maxX = CONFIG.width - CONFIG.roadMargin - 20;
+    if (this.x < minX) this.x = minX;
+    if (this.x > maxX) this.x = maxX;
   }
 
   takeDamage(amount) {
@@ -409,6 +495,13 @@ export default class Enemy extends Phaser.Physics.Arcade.Sprite {
 
   getProjectiles() {
     return this.projectiles;
+  }
+
+  // Check if a lane is safe to move into (no other cars too close)
+  isLaneSafe(targetLane) {
+    const trafficManager = this.scene.trafficManager;
+    if (!trafficManager) return true;
+    return trafficManager.isLaneClearForEnemy(this, targetLane);
   }
 
   destroyWithLabel() {

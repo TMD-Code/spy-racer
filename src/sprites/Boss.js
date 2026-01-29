@@ -368,40 +368,45 @@ export default class Boss extends Phaser.Physics.Arcade.Sprite {
   }
 
   die() {
+    // Capture references before destruction
+    const sceneRef = this.scene;
+    const bossX = this.x;
+    const bossY = this.y;
+
     // Epic explosion sequence
     for (let i = 0; i < 5; i++) {
-      this.scene.time.delayedCall(i * 200, () => {
-        if (!this.scene) return;
+      sceneRef.time.delayedCall(i * 200, () => {
+        if (!sceneRef || !sceneRef.add) return;
         const offsetX = Phaser.Math.Between(-30, 30);
         const offsetY = Phaser.Math.Between(-30, 30);
-        const explosion = this.scene.add.sprite(
-          this.x + offsetX, this.y + offsetY, 'explosion_0'
+        const explosion = sceneRef.add.sprite(
+          bossX + offsetX, bossY + offsetY, 'explosion_0'
         );
         explosion.setScale(1.5);
         explosion.setDepth(15);
         explosion.play('explode');
         explosion.once('animationcomplete', () => explosion.destroy());
 
-        if (this.scene.audio) {
-          this.scene.audio.play('explosion');
+        if (sceneRef.audio) {
+          sceneRef.audio.play('explosion');
         }
       });
     }
 
     // Big screen shake
-    this.scene.cameras.main.shake(500, 0.02);
+    sceneRef.cameras.main.shake(500, 0.02);
 
     // Show big score
-    const scoreText = this.scene.add.text(this.x, this.y, `+${this.points}`, {
+    const scoreText = sceneRef.add.text(bossX, bossY, `+${this.points}`, {
       font: 'bold 32px monospace',
       fill: '#00ff00',
       stroke: '#000000',
       strokeThickness: 4
     }).setOrigin(0.5).setDepth(30);
 
-    this.scene.tweens.add({
+    sceneRef.tweens.add({
       targets: scoreText,
-      y: this.y - 100,
+      y: bossY - 100,
       alpha: 0,
       scale: 1.5,
       duration: 1500,
@@ -409,13 +414,15 @@ export default class Boss extends Phaser.Physics.Arcade.Sprite {
     });
 
     // Award points
-    if (this.scene.player) {
-      this.scene.player.addScore(this.points);
+    if (sceneRef.player) {
+      sceneRef.player.addScore(this.points);
     }
 
     // Show victory message
-    this.scene.time.delayedCall(500, () => {
-      const victory = this.scene.add.text(
+    sceneRef.time.delayedCall(500, () => {
+      if (!sceneRef || !sceneRef.add) return;
+
+      const victory = sceneRef.add.text(
         CONFIG.width / 2, CONFIG.height / 2, 'BOSS DEFEATED!', {
           font: 'bold 28px monospace',
           fill: '#00ff00',
@@ -424,14 +431,18 @@ export default class Boss extends Phaser.Physics.Arcade.Sprite {
         }
       ).setOrigin(0.5).setDepth(50);
 
-      this.scene.tweens.add({
+      sceneRef.tweens.add({
         targets: victory,
         scale: 1.2,
         duration: 500,
         yoyo: true,
         repeat: 2,
         onComplete: () => {
-          this.scene.tweens.add({
+          if (!sceneRef || !sceneRef.tweens) {
+            victory.destroy();
+            return;
+          }
+          sceneRef.tweens.add({
             targets: victory,
             alpha: 0,
             duration: 500,
@@ -442,7 +453,7 @@ export default class Boss extends Phaser.Physics.Arcade.Sprite {
     });
 
     // Notify scene that boss is defeated
-    this.scene.events.emit('bossDefeated');
+    sceneRef.events.emit('bossDefeated');
 
     this.destroyCompletely();
   }

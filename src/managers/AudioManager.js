@@ -7,7 +7,6 @@ export default class AudioManager {
     this.enabled = this.audioSystemEnabled;
     this.musicEnabled = this.audioSystemEnabled;
     this.musicPlaying = false;
-    this.musicNodes = [];
     this.masterGain = null;
     this.musicGain = null;
     this.contextResumed = false;
@@ -69,6 +68,16 @@ export default class AudioManager {
 
       source.connect(gainNode);
       source.start();
+
+      // Auto-cleanup when source ends to prevent memory leak
+      source.onended = () => {
+        try {
+          source.disconnect();
+          gainNode.disconnect();
+        } catch (e) {
+          // Ignore errors
+        }
+      };
     } catch (e) {
       // Silently fail - don't spam console for audio issues
     }
@@ -116,10 +125,15 @@ export default class AudioManager {
     const currentTime = this.audioContext.currentTime;
     const scheduleAheadTime = 0.5; // Schedule 500ms ahead
 
+    // Safety limit to prevent infinite loop if loopDuration is somehow 0 or invalid
+    let loopsScheduled = 0;
+    const maxLoopsPerCall = 10;
+
     // Schedule loops until we're ahead enough
-    while (this.nextLoopTime < currentTime + scheduleAheadTime) {
+    while (this.nextLoopTime < currentTime + scheduleAheadTime && loopsScheduled < maxLoopsPerCall) {
       this.scheduleOneLoop(this.nextLoopTime);
       this.nextLoopTime += this.loopDuration;
+      loopsScheduled++;
     }
   }
 
@@ -166,7 +180,15 @@ export default class AudioManager {
     oscillator.start(startTime);
     oscillator.stop(startTime + duration + 0.1);
 
-    this.musicNodes.push({ oscillator, gainNode });
+    // Auto-cleanup when oscillator ends to prevent memory leak
+    oscillator.onended = () => {
+      try {
+        oscillator.disconnect();
+        gainNode.disconnect();
+      } catch (e) {
+        // Ignore errors from already disconnected nodes
+      }
+    };
   }
 
   scheduleNoise(startTime, duration, volume = 0.05) {
@@ -197,6 +219,17 @@ export default class AudioManager {
     gainNode.connect(this.musicGain);
 
     source.start(startTime);
+
+    // Auto-cleanup when source ends to prevent memory leak
+    source.onended = () => {
+      try {
+        source.disconnect();
+        filter.disconnect();
+        gainNode.disconnect();
+      } catch (e) {
+        // Ignore errors from already disconnected nodes
+      }
+    };
   }
 
   stopMusic() {
@@ -208,17 +241,7 @@ export default class AudioManager {
       this.schedulerRAF = null;
     }
 
-    // Clean up music nodes
-    this.musicNodes.forEach(({ oscillator, gainNode }) => {
-      try {
-        oscillator.stop();
-        oscillator.disconnect();
-        gainNode.disconnect();
-      } catch (e) {
-        // Ignore errors from already stopped nodes
-      }
-    });
-    this.musicNodes = [];
+    // Note: Audio nodes now auto-cleanup via onended callback
   }
 
   toggleMusic() {

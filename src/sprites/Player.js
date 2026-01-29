@@ -12,7 +12,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
     // Physics setup
     this.setCollideWorldBounds(true);
-    this.body.setSize(36, 56);
+    this.body.setSize(52, 95); // Match visual sprite size for accurate collisions
 
     // Player state
     this.health = CONFIG.startingHealth;
@@ -56,6 +56,9 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     // Shield visual (when invulnerable)
     this.shield = scene.add.graphics();
     this.shield.setVisible(false);
+
+    // Weapons van interaction
+    this.insideVan = null;
   }
 
   setupControls() {
@@ -89,6 +92,12 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   handleMovement() {
+    // Don't allow movement when inside weapons van
+    if (this.insideVan) {
+      this.setVelocity(0, 0);
+      return;
+    }
+
     const speed = CONFIG.playerSpeed;
 
     // Check for touch joystick input
@@ -127,9 +136,61 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       }
     }
 
-    // Keep player in road bounds
-    const minX = CONFIG.roadMargin + 20;
-    const maxX = CONFIG.width - CONFIG.roadMargin - 20;
+    // Road boundary danger - grass slows and damages player
+    const roadLeft = CONFIG.roadMargin + 10;
+    const roadRight = CONFIG.width - CONFIG.roadMargin - 10;
+
+    // Check if player is on the grass (road edge danger zone)
+    if (this.x < roadLeft || this.x > roadRight) {
+      // Player is on grass - apply penalties
+      this.onGrass = true;
+
+      // Slow down significantly
+      this.currentSpeed = Math.max(this.currentSpeed - 5, CONFIG.playerMinSpeed);
+
+      // Apply resistance (push back toward road)
+      if (this.x < roadLeft) {
+        this.setVelocityX(this.body.velocity.x + 50); // Push right
+      } else {
+        this.setVelocityX(this.body.velocity.x - 50); // Push left
+      }
+
+      // Take damage over time (every 500ms while on grass)
+      if (!this.grassDamageTimer) {
+        this.grassDamageTimer = this.scene.time.now;
+      }
+
+      if (this.scene.time.now - this.grassDamageTimer > 500) {
+        this.grassDamageTimer = this.scene.time.now;
+        if (!this.isInvulnerable) {
+          this.takeDamage(5);
+          this.scene.showFloatingText(this.x, this.y - 30, 'OFF ROAD!', '#ff6600');
+        }
+      }
+
+      // Visual feedback - shake/vibrate effect
+      if (!this.grassShaking) {
+        this.grassShaking = true;
+        this.scene.tweens.add({
+          targets: this,
+          angle: { from: -3, to: 3 },
+          duration: 50,
+          yoyo: true,
+          repeat: 2,
+          onComplete: () => {
+            this.angle = 0;
+            this.grassShaking = false;
+          }
+        });
+      }
+    } else {
+      this.onGrass = false;
+      this.grassDamageTimer = null;
+    }
+
+    // Hard boundaries - can't go completely off screen
+    const minX = 10;
+    const maxX = CONFIG.width - 10;
     this.x = Phaser.Math.Clamp(this.x, minX, maxX);
   }
 

@@ -8,13 +8,18 @@ import PowerUpManager from '../managers/PowerUpManager.js';
 import LevelManager from '../managers/LevelManager.js';
 import AudioManager from '../managers/AudioManager.js';
 import HazardManager from '../managers/HazardManager.js';
+import SceneryManager from '../managers/SceneryManager.js';
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: SCENES.GAME });
   }
 
-  create() {
+  create(data) {
+    // Get game mode from menu (default to campaign)
+    this.gameMode = data?.mode || 'campaign';
+    this.isEndlessMode = this.gameMode === 'endless';
+
     this.gameStarted = false;
     this.isPaused = false;
     this.tutorialShown = false;
@@ -48,6 +53,9 @@ export default class GameScene extends Phaser.Scene {
     // Create road
     this.roadManager = new RoadManager(this);
 
+    // Create roadside scenery (trees, rocks, etc.)
+    this.sceneryManager = new SceneryManager(this);
+
     // Create player
     this.player = new Player(this, CONFIG.width / 2, CONFIG.height - 100);
     this.player.audio = this.audio;
@@ -58,8 +66,8 @@ export default class GameScene extends Phaser.Scene {
     // Create power-up manager
     this.powerUpManager = new PowerUpManager(this);
 
-    // Create level manager
-    this.levelManager = new LevelManager(this);
+    // Create level manager (pass game mode)
+    this.levelManager = new LevelManager(this, this.isEndlessMode);
 
     // Create hazard manager
     this.hazardManager = new HazardManager(this);
@@ -117,16 +125,25 @@ export default class GameScene extends Phaser.Scene {
       0.8
     ).setDepth(50);
 
-    // Title
-    this.tutorialTitle = this.add.text(CONFIG.width / 2, 80, 'HOW TO PLAY', {
-      font: 'bold 32px monospace',
-      fill: '#ffffff'
+    // Title - show game mode
+    const modeTitle = this.isEndlessMode ? 'ENDLESS ARCADE' : 'CAMPAIGN MODE';
+    const modeColor = this.isEndlessMode ? '#ff6600' : '#00ff00';
+
+    this.tutorialTitle = this.add.text(CONFIG.width / 2, 70, modeTitle, {
+      font: 'bold 28px monospace',
+      fill: modeColor
     }).setOrigin(0.5).setDepth(51);
 
     // Goal
-    this.tutorialGoal = this.add.text(CONFIG.width / 2, 130, 'Survive and get the highest score!', {
-      font: '16px monospace',
-      fill: '#aaaaaa'
+    const goalText = this.isEndlessMode
+      ? 'Survive as long as possible! No levels, no end - just beat your high score!'
+      : 'Complete all 5 levels and defeat the bosses!';
+
+    this.tutorialGoal = this.add.text(CONFIG.width / 2, 115, goalText, {
+      font: '13px monospace',
+      fill: '#aaaaaa',
+      wordWrap: { width: 400 },
+      align: 'center'
     }).setOrigin(0.5).setDepth(51);
 
     // Enemy car example
@@ -406,7 +423,30 @@ export default class GameScene extends Phaser.Scene {
       this
     );
 
+    // Enemy vs enemy collision - prevents vehicles from overlapping each other
+    this.physics.add.collider(
+      this.trafficManager.getEnemies(),
+      this.trafficManager.getEnemies(),
+      this.enemyHitEnemy,
+      null,
+      this
+    );
+
     // Note: Helicopter collisions are handled in update() since they're not in a physics group
+  }
+
+  enemyHitEnemy(enemy1, enemy2) {
+    // When two enemies collide, push them apart horizontally
+    if (!enemy1.active || !enemy2.active) return;
+
+    // Determine which one should yield based on position
+    if (enemy1.x < enemy2.x) {
+      enemy1.x -= 5;
+      enemy2.x += 5;
+    } else {
+      enemy1.x += 5;
+      enemy2.x -= 5;
+    }
   }
 
   playerHitHazard(player, hazard) {
@@ -447,6 +487,23 @@ export default class GameScene extends Phaser.Scene {
         }
       });
     });
+  }
+
+  checkWeaponsVanInteraction() {
+    const van = this.trafficManager.getWeaponsVan();
+    if (!van || !van.active || !this.player || !this.player.active) return;
+
+    // If player is inside van, lock their position
+    if (this.player.insideVan === van) {
+      this.player.x = van.x;
+      this.player.y = van.y + 30;
+      return;
+    }
+
+    // Check if player is overlapping with van's entry zone (rear of van)
+    if (this.physics.overlap(this.player, van)) {
+      van.tryEnterVan(this.player);
+    }
   }
 
   checkEnemyProjectiles() {
@@ -530,13 +587,63 @@ export default class GameScene extends Phaser.Scene {
     // Play hit sound
     this.audio.play('hit');
 
-    // Both take damage
-    player.takeDamage(30);
-    enemy.takeDamage(2);
+    // Calculate collision direction for push effect
+    const dx = player.x - enemy.x;
+    const dy = player.y - enemy.y;
+
+    // Determine if this is a side collision (push/ram) or front/rear collision
+    const isSideCollision = Math.abs(dx) > Math.abs(dy) * 0.5;
+
+    if (isSideCollision && enemy.enemyType !== ENEMY_TYPES.CIVILIAN) {
+      // PUSH/RAM MECHANIC - Enemy pushes player sideways
+      const pushForce = 150; // Strong sideways push
+      const pushDirection = dx > 0 ? 1 : -1; // Push away from enemy
+
+      // Apply immediate velocity push
+      player.setVelocityX(player.body.velocity.x + (pushForce * pushDirection));
+
+      // Also physically move player (immediate displacement)
+      player.x += pushDirection * 15;
+
+      // Show ram effect
+      this.showFloatingText(player.x, player.y, 'RAMMED!', '#ff6600');
+
+      // Reduce damage slightly for side hits (glancing blow)
+      player.takeDamage(20);
+      enemy.takeDamage(1);
+
+      // Create spark effect at collision point
+      this.createCollisionSparks(player.x - (pushDirection * 20), player.y);
+    } else {
+      // Front/rear collision - full damage
+      player.takeDamage(30);
+      enemy.takeDamage(2);
+    }
 
     // Show floating text based on enemy type
     if (enemy.enemyType === ENEMY_TYPES.CIVILIAN) {
       this.showFloatingText(enemy.x, enemy.y, '-50', '#ff0000');
+    }
+  }
+
+  createCollisionSparks(x, y) {
+    // Create visual spark effect for collisions
+    for (let i = 0; i < 5; i++) {
+      const spark = this.add.graphics();
+      spark.fillStyle(0xffff00, 1);
+      spark.fillCircle(0, 0, 3);
+      spark.setPosition(x + Phaser.Math.Between(-10, 10), y + Phaser.Math.Between(-10, 10));
+      spark.setDepth(15);
+
+      this.tweens.add({
+        targets: spark,
+        x: spark.x + Phaser.Math.Between(-30, 30),
+        y: spark.y + Phaser.Math.Between(-30, 30),
+        alpha: 0,
+        scale: 0.5,
+        duration: 300,
+        onComplete: () => spark.destroy()
+      });
     }
   }
 
@@ -590,32 +697,42 @@ export default class GameScene extends Phaser.Scene {
   update(time, delta) {
     if (!this.gameStarted || this.isPaused) return;
 
-    // Performance monitoring
-    this.updatePerformanceMonitor(time, delta);
+    try {
+      // Performance monitoring
+      this.updatePerformanceMonitor(time, delta);
 
-    // Update road scrolling
-    this.roadManager.update(delta, this.player.currentSpeed);
+      // Update road scrolling
+      this.roadManager.update(delta, this.player.currentSpeed);
 
-    // Update player
-    this.player.update(time, delta);
+      // Update roadside scenery
+      this.sceneryManager.update(delta, this.player.currentSpeed);
 
-    // Update traffic
-    this.trafficManager.update(time, delta, this.player.currentSpeed);
+      // Update player
+      this.player.update(time, delta);
 
-    // Update power-ups
-    this.powerUpManager.update(time, delta, this.player.currentSpeed);
+      // Update traffic
+      this.trafficManager.update(time, delta, this.player.currentSpeed);
 
-    // Update hazards
-    this.hazardManager.update(delta, this.player.currentSpeed);
+      // Update power-ups
+      this.powerUpManager.update(time, delta, this.player.currentSpeed);
 
-    // Check helicopter collisions
-    this.checkHelicopterCollisions();
+      // Update hazards
+      this.hazardManager.update(delta, this.player.currentSpeed);
 
-    // Check enemy shooter projectiles
-    this.checkEnemyProjectiles();
+      // Check helicopter collisions
+      this.checkHelicopterCollisions();
 
-    // Update level progression
-    this.levelManager.update(Math.floor(this.player.score));
+      // Check enemy shooter projectiles
+      this.checkEnemyProjectiles();
+
+      // Check weapons van interaction
+      this.checkWeaponsVanInteraction();
+
+      // Update level progression
+      this.levelManager.update(Math.floor(this.player.score));
+    } catch (error) {
+      console.error('Game update error:', error);
+    }
   }
 
   updatePerformanceMonitor(time, delta) {
@@ -737,8 +854,8 @@ export default class GameScene extends Phaser.Scene {
 
   // Simple checksum for score validation (prevents trivial localStorage editing)
   generateScoreChecksum(score) {
-    // Use a simple hash combining score with a salt
-    const salt = 'SpyRacer2024';
+    // Use a simple hash combining score with a salt (include mode for different scores)
+    const salt = `SpyRacer2024${this.gameMode}`;
     const data = `${salt}${score}${salt.split('').reverse().join('')}`;
     let hash = 0;
     for (let i = 0; i < data.length; i++) {
@@ -751,8 +868,11 @@ export default class GameScene extends Phaser.Scene {
 
   getValidatedHighScore() {
     try {
-      const stored = localStorage.getItem('spyRacerHighScore');
-      const checksum = localStorage.getItem('spyRacerScoreCheck');
+      const key = this.isEndlessMode ? 'spyRacerEndlessHighScore' : 'spyRacerHighScore';
+      const checkKey = this.isEndlessMode ? 'spyRacerEndlessScoreCheck' : 'spyRacerScoreCheck';
+
+      const stored = localStorage.getItem(key);
+      const checksum = localStorage.getItem(checkKey);
       if (!stored || !checksum) return 0;
 
       const score = parseInt(stored, 10);
@@ -763,8 +883,8 @@ export default class GameScene extends Phaser.Scene {
       if (checksum !== expectedChecksum) {
         // Checksum mismatch - score may have been tampered with
         console.warn('High score validation failed - resetting');
-        localStorage.removeItem('spyRacerHighScore');
-        localStorage.removeItem('spyRacerScoreCheck');
+        localStorage.removeItem(key);
+        localStorage.removeItem(checkKey);
         return 0;
       }
 
@@ -776,9 +896,12 @@ export default class GameScene extends Phaser.Scene {
 
   saveValidatedHighScore(score) {
     try {
+      const key = this.isEndlessMode ? 'spyRacerEndlessHighScore' : 'spyRacerHighScore';
+      const checkKey = this.isEndlessMode ? 'spyRacerEndlessScoreCheck' : 'spyRacerScoreCheck';
+
       const checksum = this.generateScoreChecksum(score);
-      localStorage.setItem('spyRacerHighScore', score.toString());
-      localStorage.setItem('spyRacerScoreCheck', checksum);
+      localStorage.setItem(key, score.toString());
+      localStorage.setItem(checkKey, checksum);
     } catch (e) {
       // localStorage not available - fail silently
     }

@@ -17,7 +17,7 @@ export default class Helicopter extends Phaser.Physics.Arcade.Sprite {
     // Physics setup
     this.body.setSize(50, 40);
     this.setDepth(10); // Above other sprites
-    this.setScale(1.2); // Make helicopter a bit bigger so it's more visible
+    this.setScale(4.0); // Make helicopter much bigger so it's clearly visible
 
     // Movement state
     this.targetX = x;

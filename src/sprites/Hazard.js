@@ -82,6 +82,7 @@ export default class Hazard extends Phaser.Physics.Arcade.Sprite {
 
   applyEffect(player) {
     if (!player || !player.active) return;
+    if (!this.active || !this.scene) return;
 
     // Check if player is invulnerable
     if (player.isInvulnerable) return;
@@ -113,6 +114,7 @@ export default class Hazard extends Phaser.Physics.Arcade.Sprite {
 
   spinOutPlayer(player) {
     if (player.spinningOut) return;
+    if (!this.scene) return;
     player.spinningOut = true;
 
     // Visual spin effect
@@ -131,6 +133,8 @@ export default class Hazard extends Phaser.Physics.Arcade.Sprite {
   }
 
   showWarning() {
+    if (!this.scene) return;
+
     const warnings = {
       [HAZARD_TYPES.OIL_SPILL]: 'OIL!',
       [HAZARD_TYPES.ICE_PATCH]: 'ICE!',
@@ -154,11 +158,16 @@ export default class Hazard extends Phaser.Physics.Arcade.Sprite {
   }
 
   fadeOut() {
+    // Guard against scene being destroyed or hazard already inactive
+    if (!this.active || !this.scene) return;
+
     this.scene.tweens.add({
       targets: this,
       alpha: 0,
       duration: 500,
-      onComplete: () => this.destroy()
+      onComplete: () => {
+        if (this.active) this.destroy();
+      }
     });
   }
 }

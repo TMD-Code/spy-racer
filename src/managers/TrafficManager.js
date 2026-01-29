@@ -3,17 +3,24 @@ import { CONFIG } from '../config.js';
 import { ENEMY_TYPES } from '../utils/constants.js';
 import Enemy from '../sprites/Enemy.js';
 import Helicopter from '../sprites/Helicopter.js';
+import WeaponsVan from '../sprites/WeaponsVan.js';
 
 export default class TrafficManager {
   constructor(scene) {
     this.scene = scene;
     this.enemies = scene.physics.add.group();
     this.helicopters = [];
+    this.weaponsVan = null; // Only one weapons van at a time
     this.spawnTimers = {};
     this.difficultyMultiplier = 1;
     this.helicopterEnabled = false;
     this.helicopterTimer = 0;
     this.helicopterCooldown = 20000; // 20 seconds between helicopters
+
+    // Weapons van timing - appears periodically like in original Spy Hunter
+    this.weaponsVanTimer = 0;
+    this.weaponsVanCooldown = 25000; // 25 seconds between vans
+    this.weaponsVanInitialDelay = 10000; // First van after 10 seconds
 
     this.enemySpawnRate = CONFIG.enemySpawnRate;
     this.civilianSpawnRate = CONFIG.civilianSpawnRate;
@@ -87,8 +94,12 @@ export default class TrafficManager {
 
   findOpenLane(excludePlayerLane = false, fromBottom = false) {
     // Get current vehicle positions to find open lanes
-    // Check different zones based on spawn direction
+    // Use minimum spacing to prevent overlaps
+    const minVerticalSpacing = 180; // Minimum pixels between cars in same lane
     const laneOccupied = new Array(CONFIG.lanes).fill(false);
+
+    // Spawn positions
+    const spawnY = fromBottom ? CONFIG.height + 60 : -60;
 
     this.enemies.children.each((enemy) => {
       if (!enemy.active) return;
@@ -97,13 +108,17 @@ export default class TrafficManager {
       if (lane < 0 || lane >= CONFIG.lanes) return;
 
       if (fromBottom) {
-        // For enemies spawning from bottom, check bottom portion of screen
-        if (enemy.y > CONFIG.height * 0.6) {
+        // For enemies spawning from bottom, check if any car is too close to spawn point
+        // or anywhere in the bottom half where they could overlap while entering
+        if (enemy.y > CONFIG.height * 0.5 ||
+            Math.abs(enemy.y - spawnY) < minVerticalSpacing) {
           laneOccupied[lane] = true;
         }
       } else {
-        // For civilians spawning from top, check top portion of screen
-        if (enemy.y < CONFIG.height * 0.4) {
+        // For civilians spawning from top, check if any car is too close to spawn point
+        // or anywhere in the top half where they could overlap while entering
+        if (enemy.y < CONFIG.height * 0.5 ||
+            Math.abs(enemy.y - spawnY) < minVerticalSpacing) {
           laneOccupied[lane] = true;
         }
       }
@@ -137,6 +152,29 @@ export default class TrafficManager {
 
   getLaneX(lane) {
     return CONFIG.roadMargin + (lane * CONFIG.laneWidth) + CONFIG.laneWidth / 2;
+  }
+
+  // Check if a lane is clear for an enemy to move into
+  // Returns true if safe, false if another car is in the way
+  isLaneClearForEnemy(enemy, targetLane) {
+    const minVerticalSpacing = 120; // Minimum vertical distance to consider safe
+    let isClear = true;
+
+    this.enemies.children.each((other) => {
+      if (!other.active || other === enemy) return;
+
+      // Check if other car is in or near the target lane
+      const otherLane = this.getLaneFromX(other.x);
+      if (otherLane !== targetLane) return;
+
+      // Check vertical proximity - if too close, lane is not clear
+      const verticalDistance = Math.abs(enemy.y - other.y);
+      if (verticalDistance < minVerticalSpacing) {
+        isClear = false;
+      }
+    });
+
+    return isClear;
   }
 
   trySpawnCivilian() {
@@ -227,13 +265,15 @@ export default class TrafficManager {
     const roll = Math.random();
     let type;
 
-    if (level >= 4 && roll < 0.15) {
+    if (level >= 4 && roll < 0.12) {
       type = ENEMY_TYPES.ARMORED; // Armored appears in level 4+
-    } else if (level >= 3 && roll < 0.25) {
+    } else if (level >= 3 && roll < 0.22) {
       type = ENEMY_TYPES.SHOOTER; // Shooters appear in level 3+
     } else if (level >= 2 && roll < 0.35) {
+      type = ENEMY_TYPES.RAMMER; // Rammers appear in level 2+ - iconic Spy Hunter enemy!
+    } else if (level >= 2 && roll < 0.45) {
       type = ENEMY_TYPES.BLOCKER; // Blockers appear in level 2+
-    } else if (roll < 0.6) {
+    } else if (roll < 0.65) {
       type = ENEMY_TYPES.CHASER;
     } else {
       type = ENEMY_TYPES.MOTORCYCLE;
@@ -299,6 +339,13 @@ export default class TrafficManager {
       return false;
     });
 
+    // Update weapons van
+    if (this.weaponsVan && this.weaponsVan.active) {
+      this.weaponsVan.update(time, delta, roadSpeed);
+    } else {
+      this.weaponsVan = null;
+    }
+
     // Spawn helicopters (with longer cooldown)
     if (this.helicopterEnabled && this.gameStarted) {
       this.helicopterTimer += delta;
@@ -310,6 +357,33 @@ export default class TrafficManager {
         this.spawnHelicopter();
       }
     }
+
+    // Spawn weapons van periodically (like original Spy Hunter)
+    if (this.gameStarted) {
+      this.weaponsVanTimer += delta;
+      const cooldown = this.weaponsVanTimer < this.weaponsVanInitialDelay ?
+        this.weaponsVanInitialDelay : this.weaponsVanCooldown;
+
+      if (this.weaponsVanTimer >= cooldown && !this.weaponsVan) {
+        this.weaponsVanTimer = 0;
+        this.spawnWeaponsVan();
+      }
+    }
+  }
+
+  spawnWeaponsVan() {
+    // Only one van at a time
+    if (this.weaponsVan) return;
+
+    // Spawn in middle lane
+    const middleLane = Math.floor(CONFIG.lanes / 2);
+    const x = this.getLaneX(middleLane);
+
+    this.weaponsVan = new WeaponsVan(this.scene, x, -100);
+  }
+
+  getWeaponsVan() {
+    return this.weaponsVan;
   }
 
   increaseDifficulty() {
@@ -352,5 +426,9 @@ export default class TrafficManager {
       if (heli.active) heli.destroyCompletely();
     });
     this.helicopters = [];
+    if (this.weaponsVan && this.weaponsVan.active) {
+      this.weaponsVan.destroyCompletely();
+    }
+    this.weaponsVan = null;
   }
 }

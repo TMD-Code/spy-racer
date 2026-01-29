@@ -21,7 +21,8 @@ export const ENEMY_TYPES = {
   BOSS: 'boss',
   ARMORED: 'armored',       // Heavy, slow, takes more damage
   SHOOTER: 'shooter',       // Shoots at player
-  BLOCKER: 'blocker'        // Tries to block player path
+  BLOCKER: 'blocker',       // Tries to block player path
+  RAMMER: 'rammer'          // Gets alongside and pushes player off road
 };
 
 export const POWERUP_TYPES = {
